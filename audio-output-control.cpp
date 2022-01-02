@@ -59,7 +59,7 @@ AudioOutputControl::AudioOutputControl(int track, obs_data_t *settings)
 	mainLayout->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
 	mainLayout->setContentsMargins(0, 0, 0, 0);
 	mainLayout->setSpacing(2);
-	mainLayout->addWidget(volMeter, 0, 0, -1, 1);
+	mainLayout->addWidget(volMeter, 0, 0, -1, 1, Qt::AlignHCenter);
 
 	if (settings) {
 		obs_data_array_t *devices =
@@ -82,7 +82,10 @@ AudioOutputControl::AudioOutputControl(int track, obs_data_t *settings)
 					audio_monitor *monitor =
 						audio_monitor_create(
 							QT_TO_UTF8(device_id),
-							QT_TO_UTF8(name));
+							obs_data_get_string(
+								device,
+								"deviceName"),
+							0);
 					audio_monitor_set_volume(monitor, 1.0f);
 					audio_monitor_start(monitor);
 					audioDevices[device_id] = monitor;
@@ -113,15 +116,19 @@ AudioOutputControl::~AudioOutputControl()
 void AudioOutputControl::OBSOutputAudio(void *param, size_t mix_idx,
 					struct audio_data *data)
 {
+	if (!data)
+		return;
 	AudioOutputControl *control = static_cast<AudioOutputControl *>(param);
 
 	const struct audio_output_info *info =
 		audio_output_get_info(obs_get_audio());
+	if (!info)
+		return;
 	int nr_channels = info->speakers;
 
 	int nr_samples = data->frames;
 	int channel_nr = 0;
-	for (int plane_nr = 0; channel_nr < nr_channels; plane_nr++) {
+	for (int plane_nr = 0; plane_nr < nr_channels; plane_nr++) {
 		float *samples = (float *)data->data[plane_nr];
 		if (!samples) {
 			continue;
@@ -234,7 +241,7 @@ void AudioOutputControl::OBSOutputAudio(void *param, size_t mix_idx,
 	}
 
 	channel_nr = 0;
-	for (int plane_nr = 0; channel_nr < nr_channels; plane_nr++) {
+	for (int plane_nr = 0; plane_nr < nr_channels; plane_nr++) {
 		float *samples = (float *)data->data[plane_nr];
 		if (!samples) {
 			continue;
@@ -266,7 +273,10 @@ void AudioOutputControl::OBSOutputAudio(void *param, size_t mix_idx,
 
 	struct obs_audio_data audio;
 	for (size_t i = 0; i < MAX_AV_PLANES; i++) {
-		audio.data[i] = data->data[i];
+		if (i < nr_channels)
+			audio.data[i] = data->data[i];
+		else
+			audio.data[i] = nullptr;
 	}
 	audio.frames = data->frames;
 	audio.timestamp = data->timestamp;
@@ -363,6 +373,8 @@ obs_data_t *AudioOutputControl::GetSettings()
 
 bool AudioOutputControl::HasDevice(QString device_id)
 {
+	if (device_id.isEmpty())
+		return false;
 	auto it = audioDevices.find(device_id);
 	return it != audioDevices.end();
 }
@@ -371,11 +383,8 @@ void AudioOutputControl::AddDevice(QString device_id, QString device_name)
 {
 	auto it = audioDevices.find(device_id);
 	if (it == audioDevices.end()) {
-		QString name = QT_UTF8(obs_module_text("Track"));
-		name += " ";
-		name += QString::number(track + 1);
-		audio_monitor *monitor =
-			audio_monitor_create(QT_TO_UTF8(device_id), QT_TO_UTF8(name));
+		audio_monitor *monitor = audio_monitor_create(
+			QT_TO_UTF8(device_id), QT_TO_UTF8(device_name), 0);
 		audio_monitor_set_volume(monitor, 1.0f);
 		audio_monitor_start(monitor);
 		audioDevices[device_id] = monitor;
@@ -434,47 +443,50 @@ void AudioOutputControl::addDeviceColumn(int column, QString device_id,
 	mute->setChecked(muted);
 	mute->setEnabled(!lock);
 
-	mainLayout->addWidget(locked, 0, column, Qt::AlignHCenter);
-	mainLayout->addWidget(slider, 1, column, Qt::AlignHCenter);
-	mainLayout->addWidget(mute, 2, column, Qt::AlignHCenter);
+	mainLayout->addWidget(locked, lockRow, column, Qt::AlignHCenter);
+	mainLayout->addWidget(slider, sliderRow, column, Qt::AlignHCenter);
+	mainLayout->addWidget(mute, muteRow, column, Qt::AlignHCenter);
 }
 
 void AudioOutputControl::RemoveDevice(QString device_id)
 {
-	auto it = audioDevices.find(device_id);
+	const auto it = audioDevices.find(device_id);
 	if (it != audioDevices.end()) {
-		audio_monitor *monitor = it.value();
+		auto *monitor = it.value();
 		audio_monitor_destroy(monitor);
 		audioDevices.remove(device_id);
 	}
-	int columns = mainLayout->columnCount();
-	bool found = true;
-	for (int column = 1; column < columns; column++) {
-		QLayoutItem *item = mainLayout->itemAtPosition(1, column);
-		if (!item)
+	const auto columns = mainLayout->columnCount();
+	auto found = false;
+	for (auto column = 1; column < columns; column++) {
+		auto *item_slider =
+			mainLayout->itemAtPosition(sliderRow, column);
+		if (!item_slider)
 			continue;
-		QWidget *w = item->widget();
-		if (device_id.localeAwareCompare(w->objectName()) == 0) {
+		auto *widget = item_slider->widget();
+		if (device_id.localeAwareCompare(widget->objectName()) == 0) {
 			found = true;
-			int rows = mainLayout->rowCount();
-			for (int row = 0; row < rows; row++) {
+			const auto rows = mainLayout->rowCount();
+			for (auto row = 0; row < rows; row++) {
 				auto *item =
 					mainLayout->itemAtPosition(row, column);
 				if (item) {
 					auto *w = item->widget();
 					mainLayout->removeItem(item);
 					delete w;
+					delete item;
 				}
 			}
 		} else if (found) {
-			int rows = mainLayout->rowCount();
-			for (int row = 0; row < rows; row++) {
+			const auto rows = mainLayout->rowCount();
+			for (auto row = 0; row < rows; row++) {
 				auto *item =
 					mainLayout->itemAtPosition(row, column);
 				if (item) {
 					mainLayout->removeItem(item);
 					mainLayout->addItem(item, row,
-							    column - 1);
+							    column - 1, 1, 1,
+							    Qt::AlignHCenter);
 				}
 			}
 		}

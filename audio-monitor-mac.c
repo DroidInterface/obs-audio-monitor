@@ -249,7 +249,7 @@ void audio_monitor_set_volume(struct audio_monitor *audio_monitor, float volume)
     audio_monitor->volume = volume;
 }
 
-struct audio_monitor *audio_monitor_create(const char *device_id, const char *source_name){
+struct audio_monitor *audio_monitor_create(const char *device_id, const char* source_name, int port){
 	struct audio_monitor *audio_monitor = bzalloc(sizeof(struct audio_monitor));
 	audio_monitor->device_id = bstrdup(device_id);
 	pthread_mutex_init(&audio_monitor->mutex, NULL);
@@ -269,4 +269,12 @@ const char *audio_monitor_get_device_id(struct audio_monitor *audio_monitor){
 	if (!audio_monitor)
 		return NULL;
     return audio_monitor->device_id;
+}
+
+void audio_monitor_set_format(struct audio_monitor *audio_monitor,
+			      enum audio_format format){
+}
+
+void audio_monitor_set_samples_per_sec(struct audio_monitor *audio_monitor,
+				       long long samples_per_sec){
 }
